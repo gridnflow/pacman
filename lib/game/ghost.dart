@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:flame/components.dart';
 import 'package:flutter/material.dart';
 
@@ -42,9 +44,11 @@ abstract class Ghost extends PositionComponent {
     required this.scatterCorner,
     required TileCoord startTile,
     required this.startsOutside,
+    int frightenSeed = 0x6d6e63, // 'mnc' — fixed so wander is reproducible.
   })  : _tile = startTile,
         _startTile = startTile,
         _housePhase = startsOutside ? _HousePhase.outside : _HousePhase.inside,
+        _rng = Random(frightenSeed),
         super(anchor: Anchor.center);
 
   final Maze maze;
@@ -56,9 +60,25 @@ abstract class Ghost extends PositionComponent {
   /// Whether this ghost begins life already outside the house (Blinky).
   final bool startsOutside;
 
-  /// Movement speed in tiles per second. Slightly slower than the player's 6
-  /// (requirements §4.0 / §8 — ghosts are a touch slower than the player).
-  static const double speedTilesPerSec = 5.3;
+  /// Normal (scatter/chase) movement speed in tiles per second. Slightly slower
+  /// than the player's 6 (requirements §4.0 / §8 — ghosts are a touch slower).
+  static const double normalSpeedTilesPerSec = 5.3;
+
+  /// Frightened speed (requirements §8 — level-1 frightened ghosts move at ~50%
+  /// of base; we use a touch higher so they still feel chase-able but slow).
+  static const double frightenedSpeedTilesPerSec = 3.2;
+
+  /// Eaten "eyes" return-to-house speed — the fastest state so the player gets
+  /// the ghost back into rotation quickly (requirements §5.6).
+  static const double eatenSpeedTilesPerSec = 8.0;
+
+  /// Speed for the current [mode]. Variable so frightened slows and eaten dashes
+  /// home (requirements §5.5 / §5.6 / §8).
+  double get speedTilesPerSec => switch (_mode) {
+        GhostMode.frightened => frightenedSpeedTilesPerSec,
+        GhostMode.eaten => eatenSpeedTilesPerSec,
+        _ => normalSpeedTilesPerSec,
+      };
 
   /// How close (tile units) to a tile center we must be to make a decision.
   static const double _centerEpsilon = 0.1;
@@ -74,6 +94,15 @@ abstract class Ghost extends PositionComponent {
   /// Set when an external event (global mode flip / frighten begin) requests a
   /// one-time 180° reversal; consumed at the next tile center.
   bool _reverseQueued = false;
+
+  /// Seeded PRNG driving frightened wander (requirements §5.5). Fixed seed at
+  /// construction so a given game is reproducible.
+  final Random _rng;
+
+  /// When true the render layer flashes the frightened body white↔blue to warn
+  /// the window is about to end (requirements §5.5, level-1 5-flash tail). The
+  /// game owns the timing and toggles this each blink.
+  bool _frightenedFlashing = false;
 
   /// Continuous logical position of the ghost center, in tile units. The pixel
   /// [position] is derived from this each frame (avoids per-frame TileCoord
@@ -91,6 +120,19 @@ abstract class Ghost extends PositionComponent {
   GhostMode get mode => _mode;
   bool get isOutsideHouse => _housePhase == _HousePhase.outside;
 
+  /// Whether the frightened body should currently flash white (set by the game
+  /// during the warning tail of the frightened window).
+  bool get isFlashing => _frightenedFlashing;
+  set frightenedFlashing(bool v) => _frightenedFlashing = v;
+
+  /// The house-door target tile eaten "eyes" return to (requirements §5.6).
+  static const TileCoord houseDoorTile = TileCoord(13, _doorRow);
+
+  /// True once an [eaten] ghost has arrived back at the house door, so the game
+  /// can revive it into the current global mode (requirements §5.6).
+  bool get hasReachedHouse =>
+      _mode == GhostMode.eaten && _tile == houseDoorTile;
+
   late final Paint _paint = Paint()..color = bodyColor;
 
   /// Per-personality chase target tile (requirements §4.1–4.4). Pure function of
@@ -103,8 +145,11 @@ abstract class Ghost extends PositionComponent {
   TileCoord targetTile(TargetContext ctx) => switch (_mode) {
         GhostMode.scatter => scatterCorner,
         GhostMode.chase => chaseTarget(ctx),
-        GhostMode.frightened => scatterCorner, // TODO(Phase 5): PRNG wander.
-        GhostMode.eaten => scatterCorner, // TODO(Phase 4): house door.
+        // Frightened ghosts do not target a tile — they wander pseudo-randomly
+        // (handled in [_decideRoamingDirection]); the value here is unused.
+        GhostMode.frightened => scatterCorner,
+        // Eaten "eyes" race back to the house door (requirements §5.6).
+        GhostMode.eaten => houseDoorTile,
       };
 
   /// Force a one-time 180° reversal (requirements §5.4). Wired to the global
@@ -116,12 +161,28 @@ abstract class Ghost extends PositionComponent {
 
   void setMode(GhostMode mode) {
     _mode = mode;
+    if (mode != GhostMode.frightened) _frightenedFlashing = false;
   }
 
   /// Provide the latest targeting context (player tile/dir + Blinky tile). Cheap
   /// reference assignment; called once per frame by the game before [update].
   void updateContext(TargetContext ctx) {
     _ctx = ctx;
+  }
+
+  /// Revive an eaten ghost that has reached the house door (requirements §5.6):
+  /// drop it just inside the house in [mode], then re-run the scripted exit so
+  /// it walks back out as a normal ghost. Used by the game on [hasReachedHouse].
+  void reviveAtHouse(GhostMode mode) {
+    _tile = const TileCoord(14, 14); // inside the house.
+    _x = _tile.col + 0.5;
+    _y = _tile.row + 0.5;
+    _currentDir = Direction.up;
+    _mode = mode;
+    _frightenedFlashing = false;
+    _reverseQueued = false;
+    _housePhase = _HousePhase.leaving;
+    _syncPixelPosition();
   }
 
   /// Begin the scripted house-exit (requirements §4.7). No-op if already out or
@@ -138,6 +199,7 @@ abstract class Ghost extends PositionComponent {
     _currentDir = Direction.left;
     _mode = GhostMode.scatter;
     _reverseQueued = false;
+    _frightenedFlashing = false;
     _housePhase = startsOutside ? _HousePhase.outside : _HousePhase.inside;
     _x = _tile.col + 0.5;
     _y = _tile.row + 0.5;
@@ -180,7 +242,12 @@ abstract class Ghost extends PositionComponent {
         _x = _tile.col + 0.5;
         _y = _tile.row + 0.5;
 
-        if (_housePhase == _HousePhase.outside) {
+        if (_mode == GhostMode.eaten) {
+          // Eaten "eyes" home in on the house door, then stop on it (the game
+          // revives them next frame via [hasReachedHouse]) (requirements §5.6).
+          if (_tile == houseDoorTile) break;
+          _advanceEatenReturn();
+        } else if (_housePhase == _HousePhase.outside) {
           _decideRoamingDirection();
           if (!maze.ghostCanEnter(_tile, _currentDir)) {
             // Boxed in except for the reverse (rare): take it rather than stop.
@@ -213,6 +280,49 @@ abstract class Ghost extends PositionComponent {
     }
 
     _syncPixelPosition();
+  }
+
+  /// Whether an eaten ghost (eyes) may move [dir] from [c]. Unlike a roaming
+  /// ghost, the eyes may pass through the house door to get home.
+  bool _eatenCanEnter(TileCoord c, Direction dir) {
+    final next = maze.wrap(c.step(dir));
+    final t = maze.tileAtCoord(next);
+    return t != TileType.wall && t != TileType.house;
+  }
+
+  /// Steer eaten "eyes" toward [houseDoorTile] (requirements §5.6): greedy
+  /// min-dist² over enterable exits, excluding the 180° reversal unless it is
+  /// the only way out. No no-up/frighten constraints apply to the eyes.
+  void _advanceEatenReturn() {
+    // On the gate corridor directly above the door: step down through it.
+    if (_tile.row == _gateRow && _tile.col == houseDoorTile.col) {
+      _currentDir = Direction.down;
+      return;
+    }
+
+    final back = _currentDir.opposite;
+    Direction? best;
+    int? bestDist;
+    for (final dir in const [
+      Direction.up,
+      Direction.left,
+      Direction.down,
+      Direction.right,
+    ]) {
+      if (dir == back) continue;
+      if (!_eatenCanEnter(_tile, dir)) continue;
+      final next = maze.wrap(_tile.step(dir));
+      final d = next.dist2(houseDoorTile);
+      if (bestDist == null || d < bestDist) {
+        bestDist = d;
+        best = dir;
+      }
+    }
+    if (best != null) {
+      _currentDir = best;
+    } else if (_eatenCanEnter(_tile, back)) {
+      _currentDir = back; // dead-end: reverse is the only way.
+    }
   }
 
   /// Drive the scripted house-exit one decision: set [_currentDir] toward the
@@ -282,6 +392,13 @@ abstract class Ghost extends PositionComponent {
       return;
     }
 
+    // Frightened: pick a pseudo-random legal exit (no 180° reversal) using the
+    // seeded PRNG so the wander is reproducible (requirements §5.5).
+    if (_mode == GhostMode.frightened) {
+      _decideFrightenedDirection();
+      return;
+    }
+
     final ctx = _ctx;
     final target = ctx == null ? scatterCorner : targetTile(ctx);
     final back = _currentDir.opposite;
@@ -318,11 +435,57 @@ abstract class Ghost extends PositionComponent {
     // handles the reverse-only dead-end case.
   }
 
+  /// Frightened wander (requirements §5.5): from the legal exits (no 180°
+  /// reversal, honoring walls/house) pick one uniformly via the seeded [_rng].
+  /// Deterministic for a fixed seed + sequence of intersections.
+  void _decideFrightenedDirection() {
+    final back = _currentDir.opposite;
+    final options = <Direction>[];
+    for (final dir in const [
+      Direction.up,
+      Direction.left,
+      Direction.down,
+      Direction.right,
+    ]) {
+      if (dir == back) continue; // no 180° reversal at will.
+      if (!maze.ghostCanEnter(_tile, dir)) continue;
+      options.add(dir);
+    }
+    if (options.isNotEmpty) {
+      _currentDir = options[_rng.nextInt(options.length)];
+    }
+    // Boxed in except reverse: leave _currentDir; the caller takes the reverse.
+  }
+
+  // Frightened/eaten render palette (requirements §5.5 / §6.2).
+  static const Color _frightenedColor = Color(0xFF2C5FE0);
+  static const Color _frightenedFlashColor = Color(0xFFFFFFFF);
+  static const Color _eyeColor = Color(0xFFFFFFFF);
+
+  late final Paint _frightenedPaint = Paint()..color = _frightenedColor;
+  late final Paint _frightenedFlashPaint = Paint()..color = _frightenedFlashColor;
+  late final Paint _eyePaint = Paint()..color = _eyeColor;
+
   @override
   void render(Canvas canvas) {
-    // Placeholder dome. Real "dome + wavy skirt" sprite with per-direction eyes
-    // and frightened/eaten states arrive with the sheet in Phase 6.
     final r = size.x / 2;
+
+    if (_mode == GhostMode.eaten) {
+      // Only the eyes remain, racing home (requirements §5.6).
+      final eyeR = r * 0.22;
+      canvas.drawCircle(Offset(r - eyeR * 1.6, r), eyeR, _eyePaint);
+      canvas.drawCircle(Offset(r + eyeR * 1.6, r), eyeR, _eyePaint);
+      return;
+    }
+
+    if (_mode == GhostMode.frightened) {
+      final body = _frightenedFlashing ? _frightenedFlashPaint : _frightenedPaint;
+      canvas.drawCircle(Offset(r, r), r, body);
+      return;
+    }
+
+    // Placeholder dome. Real "dome + wavy skirt" sprite with per-direction eyes
+    // arrives with the sheet in Phase 6.
     canvas.drawCircle(Offset(r, r), r, _paint);
   }
 }

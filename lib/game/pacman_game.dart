@@ -59,9 +59,25 @@ class PacmanGame extends FlameGame {
   int _phaseIndex = 0;
   double _phaseElapsed = 0;
 
-  /// True while the (future) frightened window should freeze the phase timer.
-  /// Phase 5 will set this; kept here so the structure exists now.
-  final bool _phaseTimerPaused = false;
+  /// True while the frightened window freezes the global scatter/chase timer
+  /// (requirements §5.3). Set when a power pellet is eaten, cleared on expiry.
+  bool _phaseTimerPaused = false;
+
+  // --- Frightened window (requirements §5.3 / §5.5) ---
+
+  /// Level-1 frightened duration in seconds.
+  static const double _frightenedDuration = 6;
+
+  /// How long before expiry the ghosts begin flashing (the level-1 "5 flashes"
+  /// warning tail), and how fast the white↔blue flash toggles.
+  static const double _frightenedFlashWindow = 2;
+  static const double _flashPeriod = _frightenedFlashWindow / 10; // 5 on/off.
+
+  /// Seconds left in the frightened window; <=0 means no window active.
+  double _frightenedRemaining = 0;
+  double _flashElapsed = 0;
+
+  bool get _frightenedActive => _frightenedRemaining > 0;
 
   /// Per-ghost dot-counter release thresholds (requirements §4.7 / D-006, v1
   /// per-ghost counter). Inky leaves after 30 dots, Clyde after 60. Pinky
@@ -120,6 +136,7 @@ class PacmanGame extends FlameGame {
     // component update() runs (so turn decisions use fresh data). Cheap, no
     // per-frame allocation beyond the single shared TargetContext.
     _advancePhaseTimer(dt);
+    _advanceFrightened(dt);
     final ctx = TargetContext(
       playerTile: pacman.tile,
       playerDir: pacman.currentDir,
@@ -136,6 +153,7 @@ class PacmanGame extends FlameGame {
     if (eaten != null) {
       if (eaten.isPower) {
         state.addPowerPellet();
+        _beginFrightened();
       } else {
         state.addPellet();
       }
@@ -175,6 +193,69 @@ class PacmanGame extends FlameGame {
     }
   }
 
+  /// Enter / refresh the frightened window when a power pellet is eaten
+  /// (requirements §5.3). All active (outside-the-house) ghosts that aren't
+  /// already eaten flip to frightened and reverse once; the global phase timer
+  /// freezes; the eat-chain resets to 200. Re-eating refreshes the full 6s.
+  void _beginFrightened() {
+    state.startGhostChain();
+    _frightenedRemaining = _frightenedDuration;
+    _flashElapsed = 0;
+    _phaseTimerPaused = true;
+
+    for (final g in ghosts) {
+      if (g.mode == GhostMode.eaten) continue; // eyes keep heading home (§5.6).
+      if (!g.isOutsideHouse) continue; // ghosts still inside are not frightened.
+      final wasFrightened = g.mode == GhostMode.frightened;
+      g.setMode(GhostMode.frightened);
+      g.frightenedFlashing = false;
+      if (!wasFrightened) g.forceReverse(); // reverse only on entry (§5.4).
+    }
+  }
+
+  /// Tick the frightened window each frame (requirements §5.5): drive the flash
+  /// warning tail, and on expiry restore frightened ghosts to the current global
+  /// phase mode and unfreeze the timer. Also revives eaten "eyes" once home.
+  void _advanceFrightened(double dt) {
+    // Revive eaten ghosts that have reached the house, independent of the timer.
+    final (currentMode, _) = _phaseSchedule[_phaseIndex];
+    for (final g in ghosts) {
+      if (g.hasReachedHouse) g.reviveAtHouse(currentMode);
+    }
+
+    if (!_frightenedActive) return;
+
+    _frightenedRemaining -= dt;
+    if (_frightenedRemaining <= 0) {
+      _endFrightened();
+      return;
+    }
+
+    // Flash white↔blue during the warning tail before expiry.
+    final flashing = _frightenedRemaining <= _frightenedFlashWindow;
+    if (flashing) {
+      _flashElapsed += dt;
+      final on = (_flashElapsed ~/ _flashPeriod).isEven;
+      for (final g in ghosts) {
+        if (g.mode == GhostMode.frightened) g.frightenedFlashing = on;
+      }
+    }
+  }
+
+  /// End the frightened window: frightened ghosts return to the current global
+  /// phase mode and the scatter/chase timer resumes (requirements §5.5).
+  void _endFrightened() {
+    _frightenedRemaining = 0;
+    _flashElapsed = 0;
+    _phaseTimerPaused = false;
+    final (mode, _) = _phaseSchedule[_phaseIndex];
+    for (final g in ghosts) {
+      if (g.mode != GhostMode.frightened) continue;
+      g.setMode(mode);
+      g.frightenedFlashing = false;
+    }
+  }
+
   /// Release Inky/Clyde once enough dots have been eaten (per-ghost counter,
   /// D-006 v1). [ghosts] order is Blinky, Pinky, Inky, Clyde.
   void _releaseGhostsByDotCount() {
@@ -182,18 +263,26 @@ class PacmanGame extends FlameGame {
     if (_dotsEaten >= _clydeDotThreshold) ghosts[3].releaseFromHouse();
   }
 
-  /// Lose a life and reset on player↔ghost tile overlap (requirements §4 / §5).
-  /// Frightened/eaten ghosts are not deadly (frightened arrives in Phase 5).
+  /// Resolve player↔ghost tile overlaps (requirements §4 / §5). A frightened
+  /// ghost is eaten (score chain + becomes "eyes"); an eaten ghost is harmless;
+  /// any other (scatter/chase) ghost costs a life.
   void _resolveGhostCollisions() {
     for (final g in ghosts) {
-      if (g.mode == GhostMode.frightened || g.mode == GhostMode.eaten) continue;
       if (g.tile != pacman.tile) continue;
+
+      if (g.mode == GhostMode.eaten) continue; // eyes are harmless.
+
+      if (g.mode == GhostMode.frightened) {
+        state.eatGhost(); // 200/400/800/1600 chain (requirements §6.2).
+        g.setMode(GhostMode.eaten); // race home as eyes; not a life loss.
+        continue; // several ghosts can be eaten on the same frame.
+      }
 
       state.loseLife();
       if (!state.isGameOver) {
         _resetActors();
       }
-      return; // one collision per frame is enough.
+      return; // one deadly collision per frame is enough.
     }
   }
 
@@ -207,6 +296,9 @@ class PacmanGame extends FlameGame {
     _phaseIndex = 0;
     _phaseElapsed = 0;
     _dotsEaten = 0;
+    _frightenedRemaining = 0;
+    _flashElapsed = 0;
+    _phaseTimerPaused = false;
     final (mode, _) = _phaseSchedule[_phaseIndex];
     for (final g in ghosts) {
       g.setMode(mode);
