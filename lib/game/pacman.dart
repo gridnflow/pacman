@@ -16,18 +16,28 @@ class Pacman extends PositionComponent {
 
   final Maze maze;
 
-  /// Current tile (floor of pixel / TILE_SIZE). Mutated by movement in Phase 2.
-  // ignore: prefer_final_fields
+  /// Movement speed in tiles per second (requirements §3: ~6 t/s).
+  static const double speedTilesPerSec = 6.0;
+
+  /// How close (in logical tiles) to a tile center we must be to act on a turn.
+  static const double _centerEpsilon = 0.1;
+
+  /// Current tile (col,row of the tile whose center we are at or moving away
+  /// from). Mutated by movement.
   TileCoord _tile;
 
-  /// Direction the player is currently moving. Mutated by movement in Phase 2.
-  // ignore: prefer_final_fields
+  /// Direction the player is currently moving.
   Direction _currentDir = Direction.left;
 
   /// Most recent buffered input. Applied at the next legal tile center
   /// (requirements §3.1). `null` = no pending turn.
-  // ignore: unused_field
   Direction? _desiredDir;
+
+  /// Continuous logical position of the player's center, in *tile* units
+  /// (col, row as doubles). The render-space pixel [position] is derived from
+  /// this each frame. Kept here to avoid per-frame [TileCoord] churn.
+  late double _x = _tile.col + 0.5;
+  late double _y = _tile.row + 0.5;
 
   TileCoord get tile => _tile;
   Direction get currentDir => _currentDir;
@@ -42,24 +52,90 @@ class Pacman extends PositionComponent {
   }
 
   /// Queue a buffered direction from the input layer (control-scheme §2).
-  /// TODO(Phase 2): consume at next valid tile center; instant reverse.
+  /// An instant reverse is applied immediately; other turns are consumed at the
+  /// next legal tile center.
   void queueDirection(Direction dir) {
+    // Instant reverse: legal anywhere along a corridor (requirements §3.1).
+    if (dir == _currentDir.opposite) {
+      _currentDir = dir;
+      _desiredDir = null;
+      return;
+    }
     _desiredDir = dir;
   }
 
+  /// Reset to a tile center facing left (used on (re)spawn / level start).
+  void resetTo(TileCoord startTile) {
+    _tile = startTile;
+    _currentDir = Direction.left;
+    _desiredDir = null;
+    _x = _tile.col + 0.5;
+    _y = _tile.row + 0.5;
+    _syncPixelPosition();
+  }
+
   void _syncPixelPosition() {
-    // Center of the tile in render space.
-    position = Vector2(
-      (_tile.col + 0.5) * maze.tileSize,
-      (_tile.row + 0.5) * maze.tileSize,
-    );
+    position = Vector2(_x * maze.tileSize, _y * maze.tileSize);
+  }
+
+  /// Signed distance (tile units) from ([_x],[_y]) to the center of [_tile]
+  /// along the current movement axis. Always >= 0 because we only ever move
+  /// from one tile center toward the next.
+  double _distToTileCenter() {
+    final dx = (_tile.col + 0.5) - _x;
+    final dy = (_tile.row + 0.5) - _y;
+    return dx.abs() + dy.abs();
   }
 
   @override
   void update(double dt) {
-    // TODO(Phase 2): advance along _currentDir at the level speed, apply
-    // buffered turns at tile centers (±2px tolerance), stop at walls, wrap the
-    // tunnel. No per-frame allocation in this loop (NFR-01).
+    var remaining = speedTilesPerSec * dt; // tiles to travel this frame.
+
+    // March in hops, making a turn/stop decision at every tile center. The loop
+    // is bounded by the per-frame travel distance (a few tiles), so the guard
+    // is just defensive.
+    var guard = 0;
+    while (remaining > 1e-9 && guard < 16) {
+      guard++;
+
+      // If we're (essentially) at the current tile center, make a decision.
+      if (_distToTileCenter() <= _centerEpsilon) {
+        _x = _tile.col + 0.5; // snap exactly to kill float drift.
+        _y = _tile.row + 0.5;
+
+        // (a) Apply a legal buffered turn.
+        if (_desiredDir != null && maze.canEnter(_tile, _desiredDir!)) {
+          _currentDir = _desiredDir!;
+          _desiredDir = null;
+        }
+
+        // (b) Stop if the way forward is a wall.
+        if (!maze.canEnter(_tile, _currentDir)) {
+          break;
+        }
+
+        // (c) Commit to the next tile (with tunnel wrap) and move toward its
+        // center.
+        final raw = _tile.step(_currentDir);
+        final wrapped = maze.wrap(raw);
+        if (wrapped.col != raw.col) {
+          // Tunnel wrap: jump the continuous position to the far side so we
+          // approach the new tile's center from the correct edge.
+          _x = wrapped.col + 0.5 - _currentDir.dx * 0.5;
+          _y = wrapped.row + 0.5 - _currentDir.dy * 0.5;
+        }
+        _tile = wrapped;
+      }
+
+      // Advance toward the current tile center, never overshooting it.
+      final toCenter = _distToTileCenter();
+      final hop = remaining < toCenter ? remaining : toCenter;
+      _x += _currentDir.dx * hop;
+      _y += _currentDir.dy * hop;
+      remaining -= hop;
+    }
+
+    _syncPixelPosition();
   }
 
   @override

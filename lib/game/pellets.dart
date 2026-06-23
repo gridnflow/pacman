@@ -33,10 +33,13 @@ class PelletField extends PositionComponent {
 
   int get remaining => _pellets.values.where((p) => !p.eaten).length;
 
-  /// TODO(Phase 3): build the exact 240 standard + 4 power pellets from the
-  /// canonical tilemap (requirements §2.1). Empty for the skeleton.
+  /// Build all pellets from the maze's parsed pellet layout (the map is the
+  /// single source of truth). Called on level start and on refill.
   void loadFromMaze() {
     _pellets.clear();
+    for (final spec in maze.pelletSpecs) {
+      _pellets[spec.tile] = Pellet(tile: spec.tile, isPower: spec.isPower);
+    }
   }
 
   /// Eat the pellet on [tile] if present and uneaten. Returns the pellet (so the

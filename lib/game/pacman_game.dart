@@ -55,8 +55,7 @@ class PacmanGame extends FlameGame {
     maze = Maze(tileSize: renderTileSize);
     pellets = PelletField(maze: maze)..loadFromMaze();
 
-    // Start tiles are placeholders until the canonical map lands (Phase 2).
-    pacman = Pacman(maze: maze, startTile: const TileCoord(14, 23));
+    pacman = Pacman(maze: maze, startTile: _pacmanStart);
     ghosts = [
       Blinky(maze: maze, startTile: const TileCoord(14, 11)),
       Pinky(maze: maze, startTile: const TileCoord(14, 14)),
@@ -70,10 +69,32 @@ class PacmanGame extends FlameGame {
     world.addAll(ghosts);
   }
 
+  /// The player's spawn tile. Reused on level clear.
+  static const TileCoord _pacmanStart = TileCoord(13, 23);
+
   /// Feed a buffered direction from the input layer to the player.
   void onDirectionInput(Direction dir) => pacman.queueDirection(dir);
 
-  // TODO(Phase 4+): override update(dt) to advance the global scatter/chase
-  // timer, recompute ghost targets, resolve pellet eating, collisions,
-  // level-clear, and death. Keep it allocation-free to hold 60fps (NFR-01).
+  @override
+  void update(double dt) {
+    super.update(dt); // advances component update()s (player movement).
+
+    // Resolve pellet eating from the player's current tile.
+    final eaten = pellets.eatAt(pacman.tile);
+    if (eaten != null) {
+      if (eaten.isPower) {
+        state.addPowerPellet();
+      } else {
+        state.addPellet();
+      }
+    }
+
+    // Level clear: all pellets eaten -> refill and reset positions. Ghost FSM /
+    // proper level flow lands in a later phase; a simple refill is enough to
+    // keep the field playable.
+    if (pellets.remaining == 0) {
+      pellets.loadFromMaze();
+      pacman.resetTo(_pacmanStart);
+    }
+  }
 }
