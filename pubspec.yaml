@@ -1,0 +1,44 @@
+name: chompire
+description: "Chompire — an original Pac-Man-style maze-chase game (Flutter + Flame)."
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.10.8
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # 2D game engine: game loop, component tree, sprites, collision, tilemaps.
+  # Pinned to 1.35.x: 1.36+ requires Dart >=3.11 / Flutter >=3.41; the toolchain
+  # here is Dart 3.10.8 / Flutter 3.38.9. Bump when the SDK is upgraded.
+  flame: ^1.35.1
+
+  # Offline key-value persistence (high score, settings). No network.
+  shared_preferences: ^2.3.2
+
+  cupertino_icons: ^1.0.8
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
+
+  assets:
+    - assets/images/
+    - assets/sprites/
+    - assets/tiles/
+    - assets/audio/
+
+  # The pixel/arcade font is bundled by the Designer in the polish phase.
+  # Uncomment once assets/fonts/PressStart2P-Regular.ttf is added.
+  # fonts:
+  #   - family: PressStart2P
+  #     fonts:
+  #       - asset: assets/fonts/PressStart2P-Regular.ttf

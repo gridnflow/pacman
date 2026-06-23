@@ -1,0 +1,113 @@
+# Placeholder Art Spec
+
+Lets the Developer build the loader and game loop **in parallel** with final art. These
+placeholder PNGs match the **exact cell sizes, sheet layouts, and filenames** of the final
+assets (see `docs/style-guide.md` §7), so swapping real art in during polish requires
+**no loader changes** — only the PNG bytes change.
+
+> Rule: placeholders use flat fills + simple shapes in the real palette. Same dimensions,
+> same cell order, same filename. Don't change layout when finalizing.
+
+---
+
+## Directory layout
+
+```
+assets/
+  tiles/
+    maze_atlas.png      64×32   8×8 cells, 8 cols × 4 rows
+  sprites/
+    muncher.png         224×16  16×16 cells, 14 cols × 1 row
+    ghosts.png          128×96  16×16 cells, 8 cols × 6 rows
+    pellets.png         32×8    8×8  cells, 4 cols × 1 row
+  fonts/
+    PressStart2P-Regular.ttf     (OFL pixel font; bundle real file)
+  audio/                          (stub silent .ogg per docs/control-scheme.md §4.1)
+```
+
+Register the four PNGs, the font, and (later) audio in `pubspec.yaml` assets.
+
+---
+
+## 1. `tiles/maze_atlas.png` — 64×32, 8×8 cells (8×4 grid)
+
+| Cell | Placeholder fill | Final |
+|---|---|---|
+| 0 path | `#0B0B1A` solid | path |
+| 1 wall H | `#1B2A6B` fill, `#3B6BFF` 1px top+bottom edge | horizontal wall |
+| 2 wall V | `#1B2A6B` fill, `#3B6BFF` 1px left+right edge | vertical wall |
+| 3–6 corners | `#1B2A6B` fill, `#3B6BFF` 1px on the two relevant edges (┌┐└┘) | corners |
+| 7 junction | `#1B2A6B` fill, `#3B6BFF` border | T/cross |
+| 8 gate | `#FFB3D9` 2px horizontal bar on `#0B0B1A` | ghost gate |
+| 9 tunnel L | `#0B0B1A` (open) | tunnel edge |
+| 10 tunnel R | `#0B0B1A` (open) | tunnel edge |
+| 11–31 | transparent | reserved |
+
+Quick placeholder: any cell with a wall = blue square `#1B2A6B` with `#3B6BFF` border;
+that alone is enough to render a readable maze for dev.
+
+---
+
+## 2. `sprites/muncher.png` — 224×16, 16×16 cells (14×1)
+
+| Cells | Placeholder | Final |
+|---|---|---|
+| 0 C0 | solid `#FFD23F` circle (no mouth) | closed chomp |
+| 1 C1 | `#FFD23F` circle with a small black `#0B0B1A` wedge (mouth) facing **right** | half chomp |
+| 2 C2 | `#FFD23F` circle with a wide black wedge facing **right** | open chomp |
+| 3–13 D0–D10 | `#FFD23F` circle shrinking / wedge widening to nothing (last cell transparent) | death frames (face up) |
+
+Minimal placeholder: cells 0–2 = yellow circle / circle-with-small-wedge / circle-with-big-
+wedge. Death cells can just be the C2 frame fading alpha 100→0 across 3–13 to unblock dev.
+
+---
+
+## 3. `sprites/ghosts.png` — 128×96, 16×16 cells (8×6)
+
+Body = "dome + wavy skirt", two white eyes with `#2536C8` iris pointing in move direction.
+
+| Row | Content | Placeholder |
+|---|---|---|
+| 0 Ember (red) | `[mv0R,mv1R,mv0U,mv1U,mv0D,mv1D,mv0L,mv1L]` | `#FF4D4D` dome+skirt, eyes per dir; mv1 = skirt waves shifted. **3 sharp skirt spikes.** |
+| 1 Rosa (pink) | same 8-cell order | `#FF8AD8`. **4 round skirt bumps.** |
+| 2 Aqua (cyan) | same | `#4DE1FF`. **3 round bumps.** |
+| 3 Tango (orange)| same | `#FFA94D`. **2 wide waves.** |
+| 4 frightened | `[blue0,blue1,white0,white1, –, –, –, –]` | `#2536C8` body, pink `#FF8AD8` wavy mouth + 2 small pale eyes; white cells = `#FFFFFF` body same shape. Cells 4–7 transparent. |
+| 5 eaten eyes | `[eyesR,eyesU,eyesD,eyesL, –, –, –, –]` | just 2 white eyes + `#2536C8` iris per direction, no body. Cells 4–7 transparent. |
+
+Silhouette differences (spikes/bumps) matter even in placeholder — they're the colorblind
+cue and should survive to final (style-guide §2).
+
+Minimal placeholder: a flat colored rounded-rect with two dot eyes per direction is enough
+to unblock; refine skirt shapes in polish.
+
+---
+
+## 4. `sprites/pellets.png` — 32×8, 8×8 cells (4×1)
+
+| Cell | Placeholder | Final |
+|---|---|---|
+| 0 pellet | 2×2 `#FFE9B0` dot centered | small dot |
+| 1 power ON | 6px `#FFD23F` circle centered | power pellet |
+| 2 power OFF | transparent (blink off) | empty |
+| 3 fruit | `#FF4D4D` berry + `#3BC46B` leaf, ~6px | bonus fruit icon |
+
+---
+
+## 5. Font & audio stubs
+
+- **Font:** drop the real `PressStart2P-Regular.ttf` (OFL, redistributable) at
+  `assets/fonts/`. No placeholder needed — it's already final-quality and tiny.
+- **Audio:** create silent ~0.2 s `.ogg` stubs named per `docs/control-scheme.md` §4.1
+  (e.g. `wakka_a.ogg`, `wakka_b.ogg`, `power.ogg`, `eat_ghost.ogg`, `death.ogg`,
+  `ready.ogg`, `level_clear.ogg`, `fruit.ogg`, `ui_tap.ogg`, `extra_life.ogg`). The
+  Developer wires events now; real SFX swap in during polish.
+
+---
+
+## Swap procedure (polish phase)
+
+1. Replace each PNG with the final art **at identical dimensions and cell order**.
+2. Replace silent audio stubs with final clips (same filenames).
+3. No loader / pubspec changes needed if dimensions held.
+4. Log the swap in `docs/decisions.md`.
