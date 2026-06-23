@@ -10,6 +10,7 @@ class Blinky extends Ghost {
       : super(
           bodyColor: const Color(0xFFFF4D4D),
           scatterCorner: const TileCoord(25, 0), // top-right (requirements §4.5)
+          startsOutside: true, // Blinky begins on the gate path (§4.7).
         );
 
   @override

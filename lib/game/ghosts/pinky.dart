@@ -11,6 +11,7 @@ class Pinky extends Ghost {
       : super(
           bodyColor: const Color(0xFFFF8AD8),
           scatterCorner: const TileCoord(2, 0), // top-left (requirements §4.5)
+          startsOutside: false, // starts inside, leaves almost immediately (§4.7).
         );
 
   @override

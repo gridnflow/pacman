@@ -11,6 +11,7 @@ class Clyde extends Ghost {
       : super(
           bodyColor: const Color(0xFFFFA94D),
           scatterCorner: const TileCoord(0, 31), // bottom-left (§4.5)
+          startsOutside: false, // leaves after 60 dots eaten (§4.7).
         );
 
   static const int _fleeRadius2 = 8 * 8; // 64

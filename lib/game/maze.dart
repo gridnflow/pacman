@@ -166,6 +166,28 @@ class Maze extends PositionComponent {
 
   TileType tileAtCoord(TileCoord c) => tileAt(c.col, c.row);
 
+  /// Tiles where ghosts in scatter/chase may not select UP (requirements §4.6).
+  /// The classic positions: the tiles just above the ghost-house exit, and the
+  /// matching pair lower in the maze. Door is at row 12 (cols 13–14); the tile
+  /// above it on the gate corridor is row 11. The lower no-up pair sits on
+  /// row 23 (the GATE_PATH 'G' tiles' row neighbors), per the canonical layout.
+  /// (col,row) pairs as a flat list — TileCoord overrides ==, so it can't live
+  /// in a const Set; we test by value instead.
+  static const List<(int, int)> _noUpTiles = <(int, int)>[
+    // Above the house exit (row 11).
+    (12, 11), (13, 11), (14, 11), (15, 11),
+    // Lower no-up zone (row 23, around the central junction).
+    (12, 23), (13, 23), (14, 23), (15, 23),
+  ];
+
+  /// Whether a scatter/chase ghost is forbidden from turning UP on [c] (§4.6).
+  bool isNoUpTile(TileCoord c) {
+    for (final (col, row) in _noUpTiles) {
+      if (c.col == col && c.row == row) return true;
+    }
+    return false;
+  }
+
   /// Tunnel rows wrap horizontally. Returns the wrapped tile if [c] just stepped
   /// off either edge on a tunnel row, otherwise [c] unchanged.
   TileCoord wrap(TileCoord c) {
@@ -187,6 +209,18 @@ class Maze extends PositionComponent {
     final next = wrap(c.step(dir));
     final t = tileAtCoord(next);
     return t != TileType.wall && t != TileType.house && t != TileType.houseDoor;
+  }
+
+  /// Whether [dir] from tile [c] leads into a tile a *ghost* may occupy while
+  /// roaming the maze. Ghosts treat the house interior and door as impassable
+  /// once they are out (house entry/exit is scripted separately by the ghost),
+  /// but unlike the player they may stand on GATE_PATH. Honors tunnel wrap.
+  bool ghostCanEnter(TileCoord c, Direction dir) {
+    final next = wrap(c.step(dir));
+    final t = tileAtCoord(next);
+    return t != TileType.wall &&
+        t != TileType.house &&
+        t != TileType.houseDoor;
   }
 
   @override

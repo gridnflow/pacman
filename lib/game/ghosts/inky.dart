@@ -13,6 +13,7 @@ class Inky extends Ghost {
       : super(
           bodyColor: const Color(0xFF4DE1FF),
           scatterCorner: const TileCoord(27, 31), // bottom-right (§4.5)
+          startsOutside: false, // leaves after 30 dots eaten (§4.7).
         );
 
   @override
