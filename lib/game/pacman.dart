@@ -16,8 +16,17 @@ class Pacman extends PositionComponent {
 
   final Maze maze;
 
-  /// Movement speed in tiles per second (requirements §3: ~6 t/s).
+  /// Base full-speed movement in tiles per second (requirements §3: ~6 t/s).
+  /// The effective speed is this times [speedMultiplier], which the game sets
+  /// per level from [LevelTuning] (requirements §8).
   static const double speedTilesPerSec = 6.0;
+
+  /// Per-level speed fraction of [speedTilesPerSec] (requirements §8). The game
+  /// updates this on level change; defaults to the level-1 value (80%).
+  double speedMultiplier = 0.80;
+
+  /// Effective movement speed for this frame (base × level multiplier).
+  double get effectiveSpeed => speedTilesPerSec * speedMultiplier;
 
   /// How close (in logical tiles) to a tile center we must be to act on a turn.
   static const double _centerEpsilon = 0.1;
@@ -89,7 +98,7 @@ class Pacman extends PositionComponent {
 
   @override
   void update(double dt) {
-    var remaining = speedTilesPerSec * dt; // tiles to travel this frame.
+    var remaining = effectiveSpeed * dt; // tiles to travel this frame.
 
     // March in hops, making a turn/stop decision at every tile center. The loop
     // is bounded by the per-frame travel distance (a few tiles), so the guard

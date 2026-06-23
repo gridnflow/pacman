@@ -8,6 +8,7 @@ import 'ghosts/blinky.dart';
 import 'ghosts/clyde.dart';
 import 'ghosts/inky.dart';
 import 'ghosts/pinky.dart';
+import 'level_tuning.dart';
 import 'maze.dart';
 import 'pacman.dart';
 import 'pellets.dart';
@@ -63,10 +64,21 @@ class PacmanGame extends FlameGame {
   /// (requirements §5.3). Set when a power pellet is eaten, cleared on expiry.
   bool _phaseTimerPaused = false;
 
-  // --- Frightened window (requirements §5.3 / §5.5) ---
+  // --- Level tuning (requirements §8) ---
 
-  /// Level-1 frightened duration in seconds.
-  static const double _frightenedDuration = 6;
+  /// Current level's speed / frightened-window tuning. Refreshed on every level
+  /// change via [_applyLevelTuning]; defaults to level 1.
+  LevelTuning _tuning = LevelTuning.forLevel(1);
+
+  /// Set true on game over (lives == 0). Freezes the whole game loop so ghosts
+  /// and the player stop moving behind the game-over overlay (requirements §7).
+  bool _paused = false;
+
+  /// Whether the game loop is frozen (game over). The host reads this to decide
+  /// when to show the overlay; setting it true halts actor movement.
+  bool get isPaused => _paused;
+
+  // --- Frightened window (requirements §5.3 / §5.5) ---
 
   /// How long before expiry the ghosts begin flashing (the level-1 "5 flashes"
   /// warning tail), and how fast the white↔blue flash toggles.
@@ -122,6 +134,20 @@ class PacmanGame extends FlameGame {
       g.setMode(mode);
     }
     ghosts[1].releaseFromHouse(); // Pinky leaves almost immediately.
+
+    _applyLevelTuning();
+  }
+
+  /// Push the current [_tuning] (derived from [state.level]) onto the actors so
+  /// their speeds reflect the level (requirements §8). Called on boot and after
+  /// every [GameState.nextLevel].
+  void _applyLevelTuning() {
+    _tuning = LevelTuning.forLevel(state.level);
+    pacman.speedMultiplier = _tuning.playerSpeedMultiplier;
+    for (final g in ghosts) {
+      g.normalSpeedMultiplier = _tuning.ghostSpeedMultiplier;
+      g.frightenedSpeedMultiplier = _tuning.frightenedSpeedMultiplier;
+    }
   }
 
   /// The player's spawn tile. Reused on level clear.
@@ -130,8 +156,22 @@ class PacmanGame extends FlameGame {
   /// Feed a buffered direction from the input layer to the player.
   void onDirectionInput(Direction dir) => pacman.queueDirection(dir);
 
+  /// Restart a fresh game after game over ("Play Again"): the caller resets
+  /// [state] (score/lives/level), then this refills pellets, returns the actors
+  /// to their start positions, re-applies level-1 tuning, and unfreezes the loop
+  /// (requirements §7).
+  void restart() {
+    pellets.loadFromMaze();
+    _resetActors();
+    _applyLevelTuning();
+    _paused = false;
+  }
+
   @override
   void update(double dt) {
+    // Game over freezes the loop so actors stop behind the overlay (§7).
+    if (_paused || state.isGameOver) return;
+
     // Provide each ghost with the current targeting context *before* their
     // component update() runs (so turn decisions use fresh data). Cheap, no
     // per-frame allocation beyond the single shared TargetContext.
@@ -163,12 +203,15 @@ class PacmanGame extends FlameGame {
 
     _resolveGhostCollisions();
 
-    // Level clear: all pellets eaten -> refill and reset positions. Ghost FSM /
-    // proper level flow lands in a later phase; a simple refill is enough to
-    // keep the field playable.
+    // Level clear: all pellets eaten -> advance to the next level. The maze
+    // layout is fixed (D-008, no win state — infinite progression); we refill
+    // the pellets, reset the actors, and apply the new level's speed/frightened
+    // tuning (requirements §7 / §8).
     if (pellets.remaining == 0) {
+      state.nextLevel();
       pellets.loadFromMaze();
       _resetActors();
+      _applyLevelTuning();
     }
   }
 
@@ -199,7 +242,20 @@ class PacmanGame extends FlameGame {
   /// freezes; the eat-chain resets to 200. Re-eating refreshes the full 6s.
   void _beginFrightened() {
     state.startGhostChain();
-    _frightenedRemaining = _frightenedDuration;
+
+    // L9+ have no frightened window (§8): outside ghosts still reverse once, but
+    // they never turn blue and remain deadly. The +50 power-pellet score was
+    // already awarded by the caller.
+    if (!_tuning.hasFrightened) {
+      for (final g in ghosts) {
+        if (g.mode == GhostMode.eaten) continue;
+        if (!g.isOutsideHouse) continue;
+        g.forceReverse(); // reverse only (§5.4); no frighten.
+      }
+      return;
+    }
+
+    _frightenedRemaining = _tuning.frightenedSeconds;
     _flashElapsed = 0;
     _phaseTimerPaused = true;
 
@@ -231,8 +287,12 @@ class PacmanGame extends FlameGame {
       return;
     }
 
-    // Flash white↔blue during the warning tail before expiry.
-    final flashing = _frightenedRemaining <= _frightenedFlashWindow;
+    // Flash white↔blue during the warning tail before expiry. Cap the tail at
+    // the window length so very short (L6-8 = 1s) windows still flash sanely.
+    final flashWindow = _frightenedFlashWindow < _tuning.frightenedSeconds
+        ? _frightenedFlashWindow
+        : _tuning.frightenedSeconds;
+    final flashing = _frightenedRemaining <= flashWindow;
     if (flashing) {
       _flashElapsed += dt;
       final on = (_flashElapsed ~/ _flashPeriod).isEven;

@@ -72,12 +72,19 @@ abstract class Ghost extends PositionComponent {
   /// the ghost back into rotation quickly (requirements §5.6).
   static const double eatenSpeedTilesPerSec = 8.0;
 
+  /// Per-level speed fractions of the base constants (requirements §8). The game
+  /// sets these on level change from [LevelTuning]; defaults reproduce level 1.
+  double normalSpeedMultiplier = 0.75;
+  double frightenedSpeedMultiplier = 0.50;
+
   /// Speed for the current [mode]. Variable so frightened slows and eaten dashes
-  /// home (requirements §5.5 / §5.6 / §8).
+  /// home (requirements §5.5 / §5.6 / §8). Normal and frightened speeds scale by
+  /// the level multipliers; eaten "eyes" always dash home at full speed.
   double get speedTilesPerSec => switch (_mode) {
-        GhostMode.frightened => frightenedSpeedTilesPerSec,
+        GhostMode.frightened =>
+          frightenedSpeedTilesPerSec * frightenedSpeedMultiplier,
         GhostMode.eaten => eatenSpeedTilesPerSec,
-        _ => normalSpeedTilesPerSec,
+        _ => normalSpeedTilesPerSec * normalSpeedMultiplier,
       };
 
   /// How close (tile units) to a tile center we must be to make a decision.

@@ -4,7 +4,12 @@ import 'package:flutter/foundation.dart';
 /// unit-testable per requirements §6 / §7. Uses [ChangeNotifier] so the HUD can
 /// rebuild without the game loop pushing values every frame.
 class GameState extends ChangeNotifier {
-  GameState({this.startingLives = 3});
+  GameState({this.startingLives = 3, this.onHighScoreChanged});
+
+  /// Invoked whenever [highScore] increases, so the host can persist it (e.g.
+  /// to shared_preferences). Plain callback keeps this class Flutter/storage
+  /// agnostic and unit-testable (requirements §7).
+  final void Function(int highScore)? onHighScoreChanged;
 
   // --- Score table (requirements §6.1) ---
   static const int pelletPoints = 10;
@@ -84,7 +89,10 @@ class GameState extends ChangeNotifier {
       _extraLifeAwarded = true;
       _lives++;
     }
-    if (_score > _highScore) _highScore = _score;
+    if (_score > _highScore) {
+      _highScore = _score;
+      onHighScoreChanged?.call(_highScore);
+    }
     notifyListeners();
   }
 }
