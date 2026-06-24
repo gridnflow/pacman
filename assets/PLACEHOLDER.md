@@ -98,10 +98,30 @@ to unblock; refine skirt shapes in polish.
 
 - **Font:** drop the real `PressStart2P-Regular.ttf` (OFL, redistributable) at
   `assets/fonts/`. No placeholder needed — it's already final-quality and tiny.
-- **Audio:** create silent ~0.2 s `.ogg` stubs named per `docs/control-scheme.md` §4.1
-  (e.g. `wakka_a.ogg`, `wakka_b.ogg`, `power.ogg`, `eat_ghost.ogg`, `death.ogg`,
-  `ready.ogg`, `level_clear.ogg`, `fruit.ogg`, `ui_tap.ogg`, `extra_life.ogg`). The
-  Developer wires events now; real SFX swap in during polish.
+  **Current status (Phase 6):** no TTF is bundled yet (offline; can't fetch the OFL
+  file). Text **falls back to the system default font** and must not crash; the
+  `fonts:` block in `pubspec.yaml` stays commented until the real TTF lands. See
+  decision **D-023**.
+- **Audio:** silent ~0.2 s stubs are shipped as **`.wav`** (44.1 kHz, mono),
+  **not `.ogg`** — OGG/Vorbis needs an external encoder unavailable offline; WAV
+  comes free from Python's stdlib `wave` module and `flame_audio` loads it fine.
+  See decision **D-021**. Filenames (one per `lib/audio/sfx.dart` event, decision
+  **D-022**):
+
+  | File | Sfx method | Cue (§4.1) |
+  |---|---|---|
+  | `ready.wav` | `roundStart()` | READY! jingle |
+  | `chomp_a.wav` / `chomp_b.wav` | `pellet()` | two-tone "wakka" A/B |
+  | `power.wav` | `powerPellet()` | "wub" |
+  | `siren.wav` | (loop) | frightened/ambient siren |
+  | `ghost_eat.wav` | `ghostEaten()` | blip-up sweep |
+  | `extra_life.wav` | `extraLife()` | bright chime |
+  | `death.wav` | `death()` | descending warble |
+  | `level_clear.wav` | `levelClear()` | victory arpeggio |
+  | `fruit.wav` | `fruit()` | sparkle ping |
+  | `ui_tap.wav` | `uiTap()` | soft click |
+
+  Real SFX swap in during polish (same filenames; may move to `.ogg` then — log it).
 
 ---
 

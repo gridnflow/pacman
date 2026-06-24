@@ -44,6 +44,7 @@ abstract class Ghost extends PositionComponent {
     required this.scatterCorner,
     required TileCoord startTile,
     required this.startsOutside,
+    this.spriteRow = 0,
     int frightenSeed = 0x6d6e63, // 'mnc' — fixed so wander is reproducible.
   })  : _tile = startTile,
         _startTile = startTile,
@@ -59,6 +60,11 @@ abstract class Ghost extends PositionComponent {
 
   /// Whether this ghost begins life already outside the house (Blinky).
   final bool startsOutside;
+
+  /// This ghost's row in `sprites/ghosts.png` (0=Ember,1=Rosa,2=Aqua,3=Tango).
+  /// Injected by the subclass so the render layer can pick the right skirt
+  /// without reaching into globals.
+  final int spriteRow;
 
   /// Normal (scatter/chase) movement speed in tiles per second. Slightly slower
   /// than the player's 6 (requirements §4.0 / §8 — ghosts are a touch slower).
@@ -110,6 +116,24 @@ abstract class Ghost extends PositionComponent {
   /// the window is about to end (requirements §5.5, level-1 5-flash tail). The
   /// game owns the timing and toggles this each blink.
   bool _frightenedFlashing = false;
+
+  // --- Sprite animation (Phase 6) ---
+
+  /// Movement frames keyed by direction, 2 frames each for the skirt wobble.
+  /// Injected by the game from this ghost's [spriteRow]; null in headless tests
+  /// / on load failure -> procedural fallback.
+  Map<Direction, List<Sprite>>? moveSprites;
+
+  /// Frightened body frames: [blue0, blue1, white0, white1] (sheet row 4).
+  List<Sprite>? frightenedSprites;
+
+  /// Eaten "eyes" frames keyed by direction (sheet row 5).
+  Map<Direction, Sprite>? eatenSprites;
+
+  /// Skirt wobble period (~0.16s) — two frames per direction.
+  static const double _skirtFrameSeconds = 0.16;
+  double _animElapsed = 0;
+  int _animFrame = 0; // 0 or 1.
 
   /// Continuous logical position of the ghost center, in tile units. The pixel
   /// [position] is derived from this each frame (avoids per-frame TileCoord
@@ -239,6 +263,14 @@ abstract class Ghost extends PositionComponent {
 
   @override
   void update(double dt) {
+    // Skirt wobble (two-frame ping-pong); independent of movement so a stopped
+    // ghost still animates.
+    _animElapsed += dt;
+    while (_animElapsed >= _skirtFrameSeconds) {
+      _animElapsed -= _skirtFrameSeconds;
+      _animFrame ^= 1;
+    }
+
     var remaining = speedTilesPerSec * dt;
 
     var guard = 0;
@@ -478,7 +510,12 @@ abstract class Ghost extends PositionComponent {
     final r = size.x / 2;
 
     if (_mode == GhostMode.eaten) {
-      // Only the eyes remain, racing home (requirements §5.6).
+      final eyes = eatenSprites?[_currentDir];
+      if (eyes != null) {
+        eyes.render(canvas, size: size);
+        return;
+      }
+      // Fallback: only the eyes remain, racing home (requirements §5.6).
       final eyeR = r * 0.22;
       canvas.drawCircle(Offset(r - eyeR * 1.6, r), eyeR, _eyePaint);
       canvas.drawCircle(Offset(r + eyeR * 1.6, r), eyeR, _eyePaint);
@@ -486,13 +523,26 @@ abstract class Ghost extends PositionComponent {
     }
 
     if (_mode == GhostMode.frightened) {
+      final fr = frightenedSprites;
+      if (fr != null && fr.length >= 4) {
+        // [blue0, blue1, white0, white1]; flashing swaps to the white pair.
+        final base = _frightenedFlashing ? 2 : 0;
+        fr[base + _animFrame].render(canvas, size: size);
+        return;
+      }
       final body = _frightenedFlashing ? _frightenedFlashPaint : _frightenedPaint;
       canvas.drawCircle(Offset(r, r), r, body);
       return;
     }
 
-    // Placeholder dome. Real "dome + wavy skirt" sprite with per-direction eyes
-    // arrives with the sheet in Phase 6.
+    // Normal scatter/chase: direction skirt with the two-frame wobble.
+    final frames = moveSprites?[_currentDir];
+    if (frames != null && frames.isNotEmpty) {
+      frames[_animFrame % frames.length].render(canvas, size: size);
+      return;
+    }
+
+    // Fallback placeholder dome.
     canvas.drawCircle(Offset(r, r), r, _paint);
   }
 }

@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flame/components.dart';
 import 'package:flutter/material.dart';
 
@@ -54,6 +56,42 @@ class Pacman extends PositionComponent {
   // Style-guide §2: muncher.body.
   final Paint _bodyPaint = Paint()..color = const Color(0xFFFFD23F);
 
+  // --- Sprite animation (Phase 6) ---
+
+  /// Chomp frames 0=closed, 1=small, 2=wide. Ping-pong 0↔1↔2↔1 (§ asset spec).
+  /// Injected by the game once the sheet loads; null in headless tests/load
+  /// failure -> procedural disc fallback.
+  List<Sprite>? chompSprites;
+
+  /// Death animation frames (11), played once when [dying] is set.
+  List<Sprite>? deathSprites;
+
+  /// True while the one-shot death animation plays. The game sets this; when the
+  /// 11 frames finish, [deathFinished] flips true so the game can respawn.
+  bool dying = false;
+  bool deathFinished = false;
+
+  /// Chomp ping-pong timing (~0.07s per frame).
+  static const double _chompFrameSeconds = 0.07;
+  double _chompElapsed = 0;
+  // Ping-pong sequence over the three mouth frames.
+  static const List<int> _chompSequence = [0, 1, 2, 1];
+  int _chompStep = 0;
+
+  /// Death playback timing.
+  static const double _deathFrameSeconds = 0.12;
+  double _deathElapsed = 0;
+  int _deathFrame = 0;
+
+  /// Begin the one-shot death animation. The game freezes other actors and waits
+  /// for [deathFinished] before respawning (requirements §7).
+  void startDeath() {
+    dying = true;
+    deathFinished = false;
+    _deathElapsed = 0;
+    _deathFrame = 0;
+  }
+
   @override
   void onLoad() {
     size = Vector2.all(Maze.tileSizeLogical * 2 * (maze.tileSize / Maze.tileSizeLogical));
@@ -80,6 +118,12 @@ class Pacman extends PositionComponent {
     _desiredDir = null;
     _x = _tile.col + 0.5;
     _y = _tile.row + 0.5;
+    dying = false;
+    deathFinished = false;
+    _deathElapsed = 0;
+    _deathFrame = 0;
+    _chompElapsed = 0;
+    _chompStep = 0;
     _syncPixelPosition();
   }
 
@@ -98,6 +142,30 @@ class Pacman extends PositionComponent {
 
   @override
   void update(double dt) {
+    // While the death animation plays the player is frozen in place; advance the
+    // 11-frame sequence once, then flag completion for the game to respawn.
+    if (dying) {
+      _deathElapsed += dt;
+      if (_deathElapsed >= _deathFrameSeconds) {
+        _deathElapsed -= _deathFrameSeconds;
+        _deathFrame++;
+        final frames = deathSprites?.length ?? 11;
+        if (_deathFrame >= frames) {
+          _deathFrame = frames - 1;
+          deathFinished = true;
+        }
+      }
+      return;
+    }
+
+    // Chomp ping-pong (advances regardless of whether the player is blocked, so
+    // the mouth keeps animating against a wall — matches the arcade feel).
+    _chompElapsed += dt;
+    while (_chompElapsed >= _chompFrameSeconds) {
+      _chompElapsed -= _chompFrameSeconds;
+      _chompStep = (_chompStep + 1) % _chompSequence.length;
+    }
+
     var remaining = effectiveSpeed * dt; // tiles to travel this frame.
 
     // March in hops, making a turn/stop decision at every tile center. The loop
@@ -147,10 +215,41 @@ class Pacman extends PositionComponent {
     _syncPixelPosition();
   }
 
+  /// Rotation (radians) to orient the right-facing sheet toward [_currentDir].
+  /// up=-90°, down=+90°, left=180°. Left is rotated rather than flipped so the
+  /// chomp mouth opens the right way.
+  double get _facingAngle => switch (_currentDir) {
+        Direction.right => 0,
+        Direction.up => -math.pi / 2,
+        Direction.down => math.pi / 2,
+        Direction.left => math.pi,
+      };
+
   @override
   void render(Canvas canvas) {
-    // Placeholder: a simple disc. Real chomp animation (3-frame ping-pong,
-    // rotated by direction) lands with the sprite sheet in Phase 6.
+    final death = deathSprites;
+    if (dying && death != null && death.isNotEmpty) {
+      // Death frames are drawn upright (no rotation) — they animate a collapse.
+      final frame = death[_deathFrame.clamp(0, death.length - 1)];
+      frame.render(canvas, size: size);
+      return;
+    }
+
+    final chomp = chompSprites;
+    if (chomp != null && chomp.length >= 3) {
+      final idx = _chompSequence[_chompStep];
+      final sprite = chomp[idx];
+      // Rotate around the component centre to face the travel direction.
+      canvas.save();
+      canvas.translate(size.x / 2, size.y / 2);
+      canvas.rotate(_facingAngle);
+      canvas.translate(-size.x / 2, -size.y / 2);
+      sprite.render(canvas, size: size);
+      canvas.restore();
+      return;
+    }
+
+    // Fallback: a simple disc.
     final r = size.x / 2;
     canvas.drawCircle(Offset(r, r), r, _bodyPaint);
   }

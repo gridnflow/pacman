@@ -11,6 +11,7 @@ class Blinky extends Ghost {
           bodyColor: const Color(0xFFFF4D4D),
           scatterCorner: const TileCoord(25, 0), // top-right (requirements §4.5)
           startsOutside: true, // Blinky begins on the gate path (§4.7).
+          spriteRow: 0, // Ember (red) — row 0 of ghosts.png.
         );
 
   @override
