@@ -21,9 +21,9 @@ void main() {
       t == TileType.path || t == TileType.tunnel || t == TileType.gatePath;
 
   group('there are multiple cycling layouts', () {
-    test('exactly 7 layouts cycle with the level', () {
-      expect(Maze.mapCount, 7);
-      // L1->0, L2->1, ... L7->6, L8->0 (cycle wraps).
+    test('exactly 9 layouts cycle with the level', () {
+      expect(Maze.mapCount, 9);
+      // L1->0, L2->1, ... L9->8, L10->0 (cycle wraps).
       expect(mazeForLevel(1).level, 1);
       expect(mazeForLevel(4).level, 4);
     });
