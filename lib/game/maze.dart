@@ -24,72 +24,180 @@ class PelletSpec {
 
 /// Maze model + renderer.
 ///
-/// Phase 2: parses a hand-authored 28×31 ASCII tilemap (see [_asciiMap]) into a
-/// tile grid and a pellet layout. The map is left/right symmetric, fully
-/// connected, has a left↔right tunnel row, and a central ghost house. The
-/// maze-atlas sprite path remains a later-phase TODO; walls are drawn
-/// procedurally for now.
+/// Parses a hand-authored 28×31 ASCII tilemap into a tile grid and a pellet
+/// layout. Each map is left/right symmetric, fully connected, has a left↔right
+/// tunnel row, and a central ghost house. The maze-atlas sprite path remains a
+/// later-phase TODO; walls are drawn procedurally for now.
+///
+/// D-008 (revised): the maze layout is no longer fixed across levels. Three
+/// hand-authored layouts ([_mazeMaps]) cycle with the level — L1→map0, L2→map1,
+/// L3→map2, L4→map0, … — so infinite progression keeps the playfield fresh.
+/// Every layout keeps the central ghost-house cage, the tunnel row, the player
+/// start, the fruit tile, and the no-up tiles in identical positions (the ghost
+/// AI / spawn coordinates are hard-coded against those); only the outer
+/// corridors / walls / pellet patterns differ.
 class Maze extends PositionComponent {
-  Maze({required this.tileSize});
+  /// [level] is 1-based; it selects a layout from [_mazeMaps] via
+  /// `(level - 1) % maps.length`. Defaults to level 1 (the original map) so
+  /// existing call sites / tests that don't care about cycling get map 0.
+  Maze({required this.tileSize, int level = 1}) : _level = level {
+    _rebuild();
+  }
+
+  int _level;
+
+  /// The 1-based level whose layout is currently loaded.
+  int get level => _level;
 
   /// Logical pixels per tile in the maze model (requirements §1.1: 8).
   static const int gridCols = 28;
   static const int gridRows = 31;
   static const int tileSizeLogical = 8;
 
-  /// Hand-authored maze. Exactly [gridRows] rows of [gridCols] chars.
+  /// Hand-authored mazes. Each is exactly [gridRows] rows of [gridCols] chars.
   ///
   /// Legend:
   ///   '#' wall            '.' pellet path     'o' power pellet
   ///   ' ' empty path      'T' tunnel path     '-' house door
   ///   'H' house interior  'G' gate path (open path in front of the door)
   ///
-  /// Left/right symmetric, fully connected, four power pellets near the corners,
-  /// and a tunnel row (row 14) that wraps left↔right.
-  static const List<String> _asciiMap = <String>[
-    '############################', // 0
-    '#............##............#', // 1
-    '#.####.#####.##.#####.####.#', // 2
-    '#o####.#####.##.#####.####o#', // 3
-    '#.####.#####.##.#####.####.#', // 4
-    '#..........................#', // 5
-    '#.####.##.########.##.####.#', // 6
-    '#.####.##.########.##.####.#', // 7
-    '#......##....##....##......#', // 8
-    '######.#####.##.#####.######', // 9
-    '######.#####.##.#####.######', // 10
-    '######.##..........##.######', // 11
-    '######.##.###--###.##.######', // 12
-    '######.##.#HHHHHH#.##.######', // 13
-    'TTTTTT....#HHHHHH#....TTTTTT', // 14
-    '######.##.#HHHHHH#.##.######', // 15
-    '######.##.########.##.######', // 16
-    '######.##..........##.######', // 17
-    '######.##.########.##.######', // 18
-    '######.##.########.##.######', // 19
-    '#............##............#', // 20
-    '#.####.#####.##.#####.####.#', // 21
-    '#.####.#####.##.#####.####.#', // 22
-    '#o..##.......GG.......##..o#', // 23
-    '###.##.##.########.##.##.###', // 24
-    '###.##.##.########.##.##.###', // 25
-    '#......##....##....##......#', // 26
-    '#.##########.##.##########.#', // 27
-    '#.##########.##.##########.#', // 28
-    '#..........................#', // 29
-    '############################', // 30
+  /// Every layout is left/right symmetric, fully connected, has four power
+  /// pellets, and a tunnel row (row 14) that wraps left↔right. Critically, all
+  /// three share the *identical* central region (rows 9–19): the ghost-house
+  /// cage, the gate corridor, the tunnel row, the fruit tile (13,17), and the
+  /// no-up tiles. The ghost AI and spawn coordinates are hard-coded against
+  /// those, so only the outer corridors / walls / pellet patterns vary.
+  ///
+  /// [_mazeMaps]\[0] is the original layout (kept byte-for-byte so the movement
+  /// / targeting tests that assume its specific tiles keep passing); index 1
+  /// ("Spokes": pillar columns + a split bottom band) and index 2 ("Chambers":
+  /// a top-center pillar with nested rooms) are new originals.
+  static const List<List<String>> _mazeMaps = <List<String>>[
+    // ===================== Map 0 (original) =====================
+    <String>[
+      '############################', // 0
+      '#............##............#', // 1
+      '#.####.#####.##.#####.####.#', // 2
+      '#o####.#####.##.#####.####o#', // 3
+      '#.####.#####.##.#####.####.#', // 4
+      '#..........................#', // 5
+      '#.####.##.########.##.####.#', // 6
+      '#.####.##.########.##.####.#', // 7
+      '#......##....##....##......#', // 8
+      '######.#####.##.#####.######', // 9
+      '######.#####.##.#####.######', // 10
+      '######.##..........##.######', // 11
+      '######.##.###--###.##.######', // 12
+      '######.##.#HHHHHH#.##.######', // 13
+      'TTTTTT....#HHHHHH#....TTTTTT', // 14
+      '######.##.#HHHHHH#.##.######', // 15
+      '######.##.########.##.######', // 16
+      '######.##..........##.######', // 17
+      '######.##.########.##.######', // 18
+      '######.##.########.##.######', // 19
+      '#............##............#', // 20
+      '#.####.#####.##.#####.####.#', // 21
+      '#.####.#####.##.#####.####.#', // 22
+      '#o..##.......GG.......##..o#', // 23
+      '###.##.##.########.##.##.###', // 24
+      '###.##.##.########.##.##.###', // 25
+      '#......##....##....##......#', // 26
+      '#.##########.##.##########.#', // 27
+      '#.##########.##.##########.#', // 28
+      '#..........................#', // 29
+      '############################', // 30
+    ],
+    // ===================== Map 1 ("Spokes") =====================
+    <String>[
+      '############################', // 0
+      '#............##............#', // 1
+      '#.##.####.##.##.##.####.##.#', // 2
+      '#o##.####.##.##.##.####.##o#', // 3
+      '#.##......##.##.##......##.#', // 4
+      '#.####.##.##.##.##.##.####.#', // 5
+      '#......##..........##......#', // 6
+      '#.####.##.########.##.####.#', // 7
+      '#......##..........##......#', // 8
+      '######.#####.##.#####.######', // 9
+      '######.#####.##.#####.######', // 10
+      '######.##..........##.######', // 11
+      '######.##.###--###.##.######', // 12
+      '######.##.#HHHHHH#.##.######', // 13
+      'TTTTTT....#HHHHHH#....TTTTTT', // 14
+      '######.##.#HHHHHH#.##.######', // 15
+      '######.##.########.##.######', // 16
+      '######.##..........##.######', // 17
+      '######.##.########.##.######', // 18
+      '######.##.########.##.######', // 19
+      '#............##............#', // 20
+      '#.##.####.##.##.##.####.##.#', // 21
+      '#o##.####.##.##.##.####.##o#', // 22
+      '#.##......##.GG.##......##.#', // 23
+      '#.##.####.##.##.##.####.##.#', // 24
+      '#....####....##....####....#', // 25
+      '####.####.##.##.##.####.####', // 26
+      '#......##..........##......#', // 27
+      '#.####.##.########.##.####.#', // 28
+      '#............##............#', // 29
+      '############################', // 30
+    ],
+    // ===================== Map 2 ("Chambers") =====================
+    <String>[
+      '############################', // 0
+      '#o..........####..........o#', // 1
+      '#.##.#####.######.#####.##.#', // 2
+      '#.##.#####.######.#####.##.#', // 3
+      '#.##.....#.######.#.....##.#', // 4
+      '#.######.#.######.#.######.#', // 5
+      '#........#.######.#........#', // 6
+      '#.######.#.######.#.######.#', // 7
+      '#......##..........##......#', // 8
+      '######.#####.##.#####.######', // 9
+      '######.#####.##.#####.######', // 10
+      '######.##..........##.######', // 11
+      '######.##.###--###.##.######', // 12
+      '######.##.#HHHHHH#.##.######', // 13
+      'TTTTTT....#HHHHHH#....TTTTTT', // 14
+      '######.##.#HHHHHH#.##.######', // 15
+      '######.##.########.##.######', // 16
+      '######.##..........##.######', // 17
+      '######.##.########.##.######', // 18
+      '######.##.########.##.######', // 19
+      '#......##..........##......#', // 20
+      '#.####.##.###..###.##.####.#', // 21
+      '#.####.##.###..###.##.####.#', // 22
+      '#......##....GG....##......#', // 23
+      '######.##.###..###.##.######', // 24
+      '#o.....##..........##.....o#', // 25
+      '#.##########.##.##########.#', // 26
+      '#.#........#.##.#........#.#', // 27
+      '#.#.######.#.##.#.######.#.#', // 28
+      '#............##............#', // 29
+      '############################', // 30
+    ],
   ];
+
+  /// The layout cycling order: L1→0, L2→1, L3→2, L4→0, … (D-008 revised).
+  int get _mapIndex => (_level - 1) % _mazeMaps.length;
+
+  /// The ASCII rows for the currently selected level.
+  List<String> get _asciiMap => _mazeMaps[_mapIndex];
+
+  /// How many distinct layouts cycle. Exposed for tests / validation.
+  static int get mapCount => _mazeMaps.length;
 
   /// Render-space size of a tile (logical * camera scale handled by caller).
   final double tileSize;
 
-  /// Row-major grid of tile types. `_grid[row][col]`.
-  late final List<List<TileType>> _grid = _buildGridFromAscii();
+  /// Row-major grid of tile types. `_grid[row][col]`. Rebuilt by [loadLevel]
+  /// when the level (and therefore the layout) changes.
+  List<List<TileType>> _grid = const <List<TileType>>[];
 
-  /// Pellet placements parsed from the map. Each entry is `(coord, isPower)`.
-  /// [PelletField.loadFromMaze] consumes this so the map is the single source
-  /// of truth for pellet layout.
-  late final List<PelletSpec> pelletSpecs = _buildPelletSpecs();
+  /// Pellet placements parsed from the active map. Each entry is
+  /// `(coord, isPower)`. [PelletField.loadFromMaze] consumes this so the map is
+  /// the single source of truth for the pellet layout. Mutable: rebuilt by
+  /// [loadLevel] on each layout change.
+  List<PelletSpec> pelletSpecs = const <PelletSpec>[];
 
   // --- Palette (style-guide §2) ---
   static const Color _bg = Color(0xFF0B0B1A);
@@ -114,6 +222,23 @@ class Maze extends PositionComponent {
   @override
   void onLoad() {
     size = Vector2(gridCols * tileSize, gridRows * tileSize);
+  }
+
+  /// Swap to the layout for [level] (1-based) and rebuild the grid + pellet
+  /// specs in place. The same [Maze] instance is reused, so actors that hold a
+  /// reference to it pick up the new geometry without re-wiring. The caller is
+  /// responsible for reloading the pellet field (`PelletField.loadFromMaze`)
+  /// and resetting the actors afterwards. No-op if the layout is unchanged.
+  void loadLevel(int level) {
+    if (level == _level) return;
+    _level = level;
+    _rebuild();
+  }
+
+  /// Rebuild [_grid] and [pelletSpecs] from the currently selected [_asciiMap].
+  void _rebuild() {
+    _grid = _buildGridFromAscii();
+    pelletSpecs = _buildPelletSpecs();
   }
 
   /// Parse [_asciiMap] into the tile grid. Pellet/power markers map to passable

@@ -137,7 +137,7 @@ class PacmanGame extends FlameGame {
     );
     camera.viewfinder.anchor = Anchor.topLeft;
 
-    maze = Maze(tileSize: renderTileSize);
+    maze = Maze(tileSize: renderTileSize, level: state.level);
     pellets = PelletField(maze: maze)..loadFromMaze();
 
     pacman = Pacman(maze: maze, startTile: _pacmanStart);
@@ -287,6 +287,7 @@ class PacmanGame extends FlameGame {
   /// to their start positions, re-applies level-1 tuning, and unfreezes the loop
   /// (requirements §7).
   void restart() {
+    maze.loadLevel(state.level); // back to level 1's layout after game over.
     pellets.loadFromMaze();
     _clearFruit();
     _levelDotsEaten = 0;
@@ -357,14 +358,17 @@ class PacmanGame extends FlameGame {
     _resolveGhostCollisions();
     if (_dying) return; // a deadly hit started the death sequence this frame.
 
-    // Level clear: all pellets eaten -> advance to the next level. The maze
-    // layout is fixed (D-008, no win state — infinite progression); we refill
-    // the pellets, reset the actors, and apply the new level's speed/frightened
-    // tuning (requirements §7 / §8).
+    // Level clear: all pellets eaten -> advance to the next level. There is no
+    // win state (D-008, infinite progression); the maze layout now *cycles*
+    // with the level (D-008 revised), so we swap the maze to the new level's
+    // layout, refill the pellets from it, reset the actors, and apply the new
+    // level's speed/frightened tuning (requirements §7 / §8). The same maze
+    // instance is reused (actors keep their reference); only its grid changes.
     if (pellets.remaining == 0) {
       Sfx.instance.stopSiren();
       Sfx.instance.levelClear();
       state.nextLevel();
+      maze.loadLevel(state.level);
       pellets.loadFromMaze();
       _clearFruit();
       _levelDotsEaten = 0;

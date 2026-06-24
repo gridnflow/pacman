@@ -1,6 +1,7 @@
-/// Per-level difficulty tuning (requirements §8). The maze layout is fixed
-/// across all levels (D-008, infinite progression / no win state); only speeds
-/// and the frightened-window length change as the level climbs.
+/// Per-level difficulty tuning (requirements §8). Speeds and the
+/// frightened-window length change as the level climbs (D-008, infinite
+/// progression / no win state). The maze layout also cycles per level (D-008
+/// revised), but that is owned by [Maze], not this table.
 ///
 /// Speeds are expressed as *multipliers* applied to the actors' base
 /// full-speed constants ([Pacman.speedTilesPerSec], [Ghost.normalSpeedTilesPerSec],
@@ -24,7 +25,9 @@ class LevelTuning {
   /// L5+ 100%).
   final double playerSpeedMultiplier;
 
-  /// Normal ghost (scatter/chase) speed fraction (§8: L1 75%, L2-4 85%, L5+ 95%).
+  /// Normal ghost (scatter/chase) speed fraction (§8: L1 75%, L2-4 85%,
+  /// L5 95%). Past L5 it ramps a further +0.5%/level, capped at 105%, so
+  /// infinite progression keeps tightening (D-008 revised).
   final double ghostSpeedMultiplier;
 
   /// Frightened ghost speed fraction (§8: L1 50%, L2-4 55%, L5+ 60%).
@@ -56,8 +59,17 @@ class LevelTuning {
       ghostMul = 0.85;
       frightenedMul = 0.55;
     } else {
+      // L5+ band: the §8 table caps here at 100% / 95% / 60%. To keep infinite
+      // progression from feeling flat (D-008 revised), ghosts keep edging up
+      // very slowly past L5 — +0.5%/level above the 0.95 base — up to a hard
+      // ceiling of 1.05 (reached around L25). The L5 value is exactly 0.95 so
+      // the §8 band start is untouched; player/frightened multipliers stay at
+      // the table values.
       playerMul = 1.00;
-      ghostMul = 0.95;
+      const ghostBase = 0.95;
+      const ghostCeil = 1.05;
+      final ramped = ghostBase + (l - 5) * 0.005;
+      ghostMul = ramped > ghostCeil ? ghostCeil : ramped;
       frightenedMul = 0.60;
     }
 
