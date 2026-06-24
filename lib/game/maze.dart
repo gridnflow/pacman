@@ -93,15 +93,23 @@ class Maze extends PositionComponent {
 
   // --- Palette (style-guide §2) ---
   static const Color _bg = Color(0xFF0B0B1A);
-  static const Color _wallFill = Color(0xFF1B2A6B);
-  static const Color _wallEdge = Color(0xFF3B6BFF);
+  static const Color _wallEdge = Color(0xFF3B6BFF); // neon blue stroke
+  static const Color _gate = Color(0xFFFFB3D9); // ghost-house gate (pink)
 
   final Paint _bgPaint = Paint()..color = _bg;
-  final Paint _wallFillPaint = Paint()..color = _wallFill;
-  final Paint _wallEdgePaint = Paint()
+
+  /// Neon wall stroke. Width scales with the tile so it reads at any zoom.
+  late final Paint _wallEdgePaint = Paint()
     ..color = _wallEdge
     ..style = PaintingStyle.stroke
-    ..strokeWidth = 1;
+    ..strokeWidth = (tileSize / Maze.tileSizeLogical) * 1.0
+    ..strokeCap = StrokeCap.round
+    ..isAntiAlias = true;
+
+  late final Paint _gatePaint = Paint()
+    ..color = _gate
+    ..strokeWidth = (tileSize / Maze.tileSizeLogical) * 1.5
+    ..strokeCap = StrokeCap.round;
 
   @override
   void onLoad() {
@@ -223,24 +231,70 @@ class Maze extends PositionComponent {
         t != TileType.houseDoor;
   }
 
+  /// Whether the tile at [col],[row] is a wall (out-of-bounds counts as wall so
+  /// the maze border closes cleanly). Used by the autotiler to decide which
+  /// edges of a wall tile face open space.
+  bool _isWallAt(int col, int row) => tileAt(col, row) == TileType.wall;
+
   @override
   void render(Canvas canvas) {
     // Background.
     canvas.drawRect(size.toRect(), _bgPaint);
 
-    // Draw wall tiles. TODO(Phase 2): draw from maze_atlas.png or procedural
-    // rounded-rect strokes per style-guide §7.1; this is the placeholder path.
+    // Autotiled neon walls (style-guide §7.1): instead of filling each wall
+    // tile, draw a neon-blue stroke only on the edges that face open (non-wall)
+    // space. Adjacent walls share clean continuous lines and corners round off,
+    // giving the classic single-line maze look. Inset by ~1.5px (logical) so
+    // parallel corridor walls read as two lines, not one fat block.
+    final unit = tileSize / Maze.tileSizeLogical; // logical px -> render px
+    final inset = unit * 1.5;
+
     for (var row = 0; row < gridRows; row++) {
       for (var col = 0; col < gridCols; col++) {
         if (_grid[row][col] != TileType.wall) continue;
-        final rect = Rect.fromLTWH(
-          col * tileSize,
-          row * tileSize,
-          tileSize,
-          tileSize,
+
+        final left = col * tileSize;
+        final top = row * tileSize;
+        final right = left + tileSize;
+        final bottom = top + tileSize;
+
+        // Inset edges of this tile's neon outline.
+        final il = left + inset;
+        final it = top + inset;
+        final ir = right - inset;
+        final ib = bottom - inset;
+
+        final openUp = !_isWallAt(col, row - 1);
+        final openDown = !_isWallAt(col, row + 1);
+        final openLeft = !_isWallAt(col - 1, row);
+        final openRight = !_isWallAt(col + 1, row);
+
+        // Straight neon segments on each side that faces open space.
+        if (openUp) {
+          canvas.drawLine(Offset(il, it), Offset(ir, it), _wallEdgePaint);
+        }
+        if (openDown) {
+          canvas.drawLine(Offset(il, ib), Offset(ir, ib), _wallEdgePaint);
+        }
+        if (openLeft) {
+          canvas.drawLine(Offset(il, it), Offset(il, ib), _wallEdgePaint);
+        }
+        if (openRight) {
+          canvas.drawLine(Offset(ir, it), Offset(ir, ib), _wallEdgePaint);
+        }
+      }
+    }
+
+    // Ghost-house gate: a horizontal pink bar across the door tiles.
+    for (var row = 0; row < gridRows; row++) {
+      for (var col = 0; col < gridCols; col++) {
+        if (_grid[row][col] != TileType.houseDoor) continue;
+        final cy = row * tileSize + tileSize * 0.5;
+        canvas.drawLine(
+          Offset(col * tileSize, cy),
+          Offset((col + 1) * tileSize, cy),
+          _gatePaint,
         );
-        canvas.drawRect(rect, _wallFillPaint);
-        canvas.drawRect(rect.deflate(0.5), _wallEdgePaint);
       }
     }
   }
