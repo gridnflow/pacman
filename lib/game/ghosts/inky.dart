@@ -14,6 +14,7 @@ class Inky extends Ghost {
           bodyColor: const Color(0xFF4DE1FF),
           scatterCorner: const TileCoord(27, 31), // bottom-right (§4.5)
           startsOutside: false, // leaves after 30 dots eaten (§4.7).
+          spriteRow: 2, // Aqua (cyan) — row 2 of ghosts.png.
         );
 
   @override

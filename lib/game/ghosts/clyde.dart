@@ -12,6 +12,7 @@ class Clyde extends Ghost {
           bodyColor: const Color(0xFFFFA94D),
           scatterCorner: const TileCoord(0, 31), // bottom-left (§4.5)
           startsOutside: false, // leaves after 60 dots eaten (§4.7).
+          spriteRow: 3, // Tango (orange) — row 3 of ghosts.png.
         );
 
   static const int _fleeRadius2 = 8 * 8; // 64

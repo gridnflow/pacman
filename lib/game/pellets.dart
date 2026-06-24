@@ -31,7 +31,29 @@ class PelletField extends PositionComponent {
   final Paint _pelletPaint = Paint()..color = const Color(0xFFFFE9B0);
   final Paint _powerPaint = Paint()..color = const Color(0xFFFFD23F);
 
+  // --- Sprites (Phase 6) ---
+
+  /// pellets.png cell 0 (regular dot). Injected by the game; null -> fallback.
+  Sprite? pelletSprite;
+
+  /// pellets.png cell 1 (power pellet, ON). Blinks against transparency.
+  Sprite? powerSprite;
+
+  /// Power-pellet blink period (~0.2s on / off).
+  static const double _blinkSeconds = 0.2;
+  double _blinkElapsed = 0;
+  bool _powerVisible = true;
+
   int get remaining => _pellets.values.where((p) => !p.eaten).length;
+
+  @override
+  void update(double dt) {
+    _blinkElapsed += dt;
+    while (_blinkElapsed >= _blinkSeconds) {
+      _blinkElapsed -= _blinkSeconds;
+      _powerVisible = !_powerVisible;
+    }
+  }
 
   /// Build all pellets from the maze's parsed pellet layout (the map is the
   /// single source of truth). Called on level start and on refill.
@@ -51,12 +73,44 @@ class PelletField extends PositionComponent {
     return p;
   }
 
+  /// Sprite draw box: one sprite cell (16px) maps to ~2 logical tiles, centred
+  /// on the pellet tile so it reads at the right scale.
+  static final Vector2 _spriteSize = Vector2.all(Maze.tileSizeLogical * 2.0);
+
   @override
   void render(Canvas canvas) {
     for (final p in _pellets.values) {
       if (p.eaten) continue;
       final cx = (p.tile.col + 0.5) * maze.tileSize;
       final cy = (p.tile.row + 0.5) * maze.tileSize;
+
+      if (p.isPower) {
+        // Power pellets blink: skip the draw on the "off" half of the cycle.
+        if (!_powerVisible) continue;
+        final sprite = powerSprite;
+        if (sprite != null) {
+          sprite.render(
+            canvas,
+            position: Vector2(cx, cy),
+            size: _spriteSize,
+            anchor: Anchor.center,
+          );
+          continue;
+        }
+      } else {
+        final sprite = pelletSprite;
+        if (sprite != null) {
+          sprite.render(
+            canvas,
+            position: Vector2(cx, cy),
+            size: _spriteSize,
+            anchor: Anchor.center,
+          );
+          continue;
+        }
+      }
+
+      // Fallback: procedural dot.
       final r = (p.isPower ? 3.0 : 1.0) * (maze.tileSize / Maze.tileSizeLogical);
       canvas.drawCircle(Offset(cx, cy), r, p.isPower ? _powerPaint : _pelletPaint);
     }
