@@ -239,7 +239,9 @@ abstract class Ghost extends PositionComponent {
 
   @override
   void onLoad() {
-    size = Vector2.all(maze.tileSize * 2);
+    // One tile wide so the ghost doesn't visibly overlap the walls of its
+    // single-tile corridor (anchor is center).
+    size = Vector2.all(maze.tileSize);
     _syncPixelPosition();
   }
 

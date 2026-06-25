@@ -94,7 +94,10 @@ class Pacman extends PositionComponent {
 
   @override
   void onLoad() {
-    size = Vector2.all(Maze.tileSizeLogical * 2 * (maze.tileSize / Maze.tileSizeLogical));
+    // One tile wide: the corridors are a single tile, so a 2-tile sprite would
+    // visibly spill over the walls on either side. Anchor is center, so the
+    // sprite spans its own tile exactly.
+    size = Vector2.all(maze.tileSize);
     _syncPixelPosition();
   }
 
